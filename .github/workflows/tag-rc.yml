@@ -87,4 +87,8 @@ jobs:
           echo "- **Branch:** release/${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** $(git rev-parse HEAD)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "The **Promote** workflow has been triggered automatically." >> $GITHUB_STEP_SUMMARY
+          echo "### Next steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. The **Promote** workflow has been triggered automatically — check the Actions tab" >> $GITHUB_STEP_SUMMARY
+          echo "2. Any previous promote run for this release will be cancelled automatically" >> $GITHUB_STEP_SUMMARY
+          echo "3. Test will deploy automatically. Approve **preprod** and **prod** when prompted" >> $GITHUB_STEP_SUMMARY
+          echo "4. If another problem is found, fix it on \`release/${VERSION}\` and run **Tag New RC** again" >> $GITHUB_STEP_SUMMARY
