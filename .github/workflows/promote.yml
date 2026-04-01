@@ -47,6 +47,17 @@ jobs:
             exit 1
           fi
 
+      - name: Validate tag is on a release branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ steps.normalise.outputs.version }}"
+          BRANCH_VERSION=$(echo "${VERSION}" | sed 's/^v//; s/-rc\.[0-9]*//')
+          if ! gh api "repos/${{ github.repository }}/branches/release%2F${BRANCH_VERSION}" --silent 2>/dev/null; then
+            echo "::error::No release branch release/${BRANCH_VERSION} found for tag ${VERSION}. Tags must belong to a release branch."
+            exit 1
+          fi
+
   deploy-test:
     needs: validate
     uses: ./.github/workflows/deploy.yml
