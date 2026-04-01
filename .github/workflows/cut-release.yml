@@ -73,7 +73,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh workflow run promote.yml -f version=v${{ inputs.version }}-rc.1
+          gh workflow run promote.yml --ref release/${{ inputs.version }} -f version=v${{ inputs.version }}-rc.1
 
       - name: Summary
         run: |
