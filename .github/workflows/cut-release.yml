@@ -1,0 +1,56 @@
+name: Cut Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., 1.2.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  cut-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Validate version format
+        run: |
+          if [[ ! "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must be in semver format (e.g., 1.2.0)"
+            exit 1
+          fi
+
+      - name: Check release branch does not already exist
+        run: |
+          if git ls-remote --heads origin release/${{ inputs.version }} | grep -q release/${{ inputs.version }}; then
+            echo "::error::Branch release/${{ inputs.version }} already exists"
+            exit 1
+          fi
+
+      - name: Create release branch
+        run: |
+          git checkout -b release/${{ inputs.version }}
+          git push origin release/${{ inputs.version }}
+
+      - name: Create first RC tag
+        run: |
+          git tag v${{ inputs.version }}-rc.1
+          git push origin v${{ inputs.version }}-rc.1
+
+      - name: Summary
+        run: |
+          echo "## Release Cut" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** release/${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** v${{ inputs.version }}-rc.1" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** $(git rev-parse HEAD)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The **Promote** workflow will trigger automatically from the tag push." >> $GITHUB_STEP_SUMMARY

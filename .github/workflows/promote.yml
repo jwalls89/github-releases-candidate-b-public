@@ -1,0 +1,70 @@
+name: Promote
+
+on:
+  push:
+    tags:
+      - "v*-rc.*"
+
+permissions:
+  contents: write
+
+jobs:
+  deploy-test:
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: test
+      version: ${{ github.ref_name }}
+
+  deploy-preprod:
+    needs: deploy-test
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: preprod
+      version: ${{ github.ref_name }}
+
+  deploy-prod:
+    needs: deploy-preprod
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: prod
+      version: ${{ github.ref_name }}
+
+  finalise:
+    needs: deploy-prod
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Determine final version
+        id: final
+        run: |
+          FINAL_VERSION=$(echo "${{ github.ref_name }}" | sed 's/-rc\.[0-9]*//')
+          echo "version=$FINAL_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create final release tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a ${{ steps.final.outputs.version }} -m "Release ${{ steps.final.outputs.version }}"
+          git push origin ${{ steps.final.outputs.version }}
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create ${{ steps.final.outputs.version }} \
+            --title "${{ steps.final.outputs.version }}" \
+            --generate-notes \
+            --latest
+
+      - name: Summary
+        run: |
+          echo "## Release Finalised" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release:** ${{ steps.final.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **From RC:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **GitHub Release created** with auto-generated notes" >> $GITHUB_STEP_SUMMARY

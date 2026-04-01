@@ -1,0 +1,50 @@
+name: Deploy (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Target environment
+        required: true
+        type: string
+      version:
+        description: Version tag to deploy
+        required: true
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Read environment config
+        run: |
+          echo "## Deployment" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat environments/${{ inputs.environment }}.json >> $GITHUB_STEP_SUMMARY
+          echo '' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Simulate deployment
+        run: |
+          echo "============================================"
+          echo "  DEPLOYING TO ${{ inputs.environment }}"
+          echo "============================================"
+          echo ""
+          echo "Version:     ${{ inputs.version }}"
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Commit:      $(git rev-parse HEAD)"
+          echo "Config:"
+          cat environments/${{ inputs.environment }}.json
+          echo ""
+          echo "============================================"
+          echo "  DEPLOYMENT COMPLETE"
+          echo "============================================"
