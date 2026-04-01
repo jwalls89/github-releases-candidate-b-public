@@ -1,0 +1,100 @@
+name: Hotfix
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_version:
+        description: "Release version to hotfix (e.g., 1.3.0) — must have an existing release branch"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate version format
+        run: |
+          if [[ ! "${{ inputs.base_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must be in semver format (e.g., 1.3.0)"
+            exit 1
+          fi
+
+      - name: Check release branch exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh api repos/${{ github.repository }}/branches/release%2F${{ inputs.base_version }} --silent 2>/dev/null; then
+            echo "::error::Branch release/${{ inputs.base_version }} does not exist"
+            exit 1
+          fi
+
+      - name: Check base release is finalised
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh api repos/${{ github.repository }}/git/ref/tags/v${{ inputs.base_version }} --silent 2>/dev/null; then
+            echo "::error::Release v${{ inputs.base_version }} has not been finalised yet — this is not a hotfix, use Tag New RC instead"
+            exit 1
+          fi
+
+      - name: Checkout release branch
+        uses: actions/checkout@v6
+        with:
+          ref: release/${{ inputs.base_version }}
+          fetch-depth: 0
+
+      - name: Determine hotfix version
+        id: hotfix
+        run: |
+          # Parse base version components
+          MAJOR=$(echo "${{ inputs.base_version }}" | cut -d. -f1)
+          MINOR=$(echo "${{ inputs.base_version }}" | cut -d. -f2)
+          PATCH=$(echo "${{ inputs.base_version }}" | cut -d. -f3)
+
+          # Find the highest existing patch version for this major.minor
+          HIGHEST_PATCH=$PATCH
+          while true; do
+            NEXT_PATCH=$((HIGHEST_PATCH + 1))
+            if git ls-remote --tags origin "refs/tags/v${MAJOR}.${MINOR}.${NEXT_PATCH}" | grep -q . || \
+               git ls-remote --tags origin "refs/tags/v${MAJOR}.${MINOR}.${NEXT_PATCH}-rc.*" | grep -q .; then
+              HIGHEST_PATCH=$NEXT_PATCH
+            else
+              break
+            fi
+          done
+
+          HOTFIX_VERSION="${MAJOR}.${MINOR}.$((HIGHEST_PATCH + 1))"
+          TAG="v${HOTFIX_VERSION}-rc.1"
+          echo "version=$HOTFIX_VERSION" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "Hotfix version: $HOTFIX_VERSION"
+          echo "Tag: $TAG"
+
+      - name: Create hotfix RC tag
+        run: |
+          git tag ${{ steps.hotfix.outputs.tag }}
+          git push origin ${{ steps.hotfix.outputs.tag }}
+
+      - name: Trigger promotion pipeline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run promote.yml -f version=${{ steps.hotfix.outputs.tag }}
+
+      - name: Summary
+        run: |
+          echo "## Hotfix Started" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Hotfixing:** v${{ inputs.base_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Hotfix version:** ${{ steps.hotfix.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** ${{ steps.hotfix.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** release/${{ inputs.base_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit:** $(git rev-parse HEAD)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The **Promote** workflow has been triggered automatically." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Remember:** Cherry-pick the fix back to main after the hotfix reaches prod." >> $GITHUB_STEP_SUMMARY
