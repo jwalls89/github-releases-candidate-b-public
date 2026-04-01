@@ -19,10 +19,12 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
     steps:
       - name: Validate RC tag format
         run: |
-          if [[ ! "${{ inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
+          if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
             echo "::error::Version must be an RC tag (e.g., v1.2.0-rc.1)"
             exit 1
           fi
@@ -31,8 +33,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh api repos/${{ github.repository }}/git/ref/tags/${{ inputs.version }} --silent 2>/dev/null; then
-            echo "::error::Tag ${{ inputs.version }} does not exist"
+          if ! gh api "repos/${{ github.repository }}/git/ref/tags/${VERSION}" --silent 2>/dev/null; then
+            echo "::error::Tag ${VERSION} does not exist"
             exit 1
           fi
 
@@ -60,6 +62,8 @@ jobs:
   finalise:
     needs: deploy-prod
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -70,30 +74,32 @@ jobs:
       - name: Determine final version
         id: final
         run: |
-          FINAL_VERSION=$(echo "${{ inputs.version }}" | sed 's/-rc\.[0-9]*//')
+          FINAL_VERSION=$(echo "${VERSION}" | sed 's/-rc\.[0-9]*//')
           echo "version=$FINAL_VERSION" >> $GITHUB_OUTPUT
           echo "Final version: $FINAL_VERSION"
 
       - name: Create final release tag
         run: |
+          FINAL="${{ steps.final.outputs.version }}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          if git rev-parse "${{ steps.final.outputs.version }}" >/dev/null 2>&1; then
-            echo "Tag ${{ steps.final.outputs.version }} already exists — skipping tag creation"
+          if git rev-parse "${FINAL}" >/dev/null 2>&1; then
+            echo "Tag ${FINAL} already exists — skipping tag creation"
           else
-            git tag -a ${{ steps.final.outputs.version }} -m "Release ${{ steps.final.outputs.version }}"
-            git push origin ${{ steps.final.outputs.version }}
+            git tag -a "${FINAL}" -m "Release ${FINAL}"
+            git push origin "${FINAL}"
           fi
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view ${{ steps.final.outputs.version }} >/dev/null 2>&1; then
-            echo "Release ${{ steps.final.outputs.version }} already exists — skipping"
+          FINAL="${{ steps.final.outputs.version }}"
+          if gh release view "${FINAL}" >/dev/null 2>&1; then
+            echo "Release ${FINAL} already exists — skipping"
           else
-            gh release create ${{ steps.final.outputs.version }} \
-              --title "${{ steps.final.outputs.version }}" \
+            gh release create "${FINAL}" \
+              --title "${FINAL}" \
               --generate-notes \
               --latest
           fi
@@ -101,9 +107,8 @@ jobs:
       - name: Determine release branch
         id: branch
         run: |
-          # Strip v prefix and -rc.N suffix to get X.Y.Z, then build branch name
-          VERSION=$(echo "${{ inputs.version }}" | sed 's/^v//; s/-rc\.[0-9]*//')
-          echo "name=release/${VERSION}" >> $GITHUB_OUTPUT
+          BRANCH_VERSION=$(echo "${VERSION}" | sed 's/^v//; s/-rc\.[0-9]*//')
+          echo "name=release/${BRANCH_VERSION}" >> $GITHUB_OUTPUT
 
       - name: Check for merge-back need
         id: mergeback
@@ -125,10 +130,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          EXISTING_NOTES=$(gh release view ${{ steps.final.outputs.version }} --json body --jq '.body')
+          FINAL="${{ steps.final.outputs.version }}"
+          AHEAD="${{ steps.mergeback.outputs.ahead }}"
+          BRANCH="${{ steps.mergeback.outputs.branch }}"
+          EXISTING_NOTES=$(gh release view "${FINAL}" --json body --jq '.body')
           MERGE_NOTE="---"
-          MERGE_NOTE="${MERGE_NOTE}\n\n⚠️ **Merge-back required:** This release has ${{ steps.mergeback.outputs.ahead }} commit(s) on \`${{ steps.mergeback.outputs.branch }}\` that are not on \`main\`. See the merge-back issue for instructions."
-          gh release edit ${{ steps.final.outputs.version }} \
+          MERGE_NOTE="${MERGE_NOTE}\n\n⚠️ **Merge-back required:** This release has ${AHEAD} commit(s) on \`${BRANCH}\` that are not on \`main\`. See the merge-back issue for instructions."
+          gh release edit "${FINAL}" \
             --notes "$(echo -e "${EXISTING_NOTES}\n\n${MERGE_NOTE}")"
 
       - name: Create merge-back issue
@@ -136,18 +144,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          FINAL="${{ steps.final.outputs.version }}"
+          AHEAD="${{ steps.mergeback.outputs.ahead }}"
           BRANCH="${{ steps.mergeback.outputs.branch }}"
-          VERSION="${{ steps.final.outputs.version }}"
+          MERGE_VERSION="${FINAL#v}"
           gh issue create \
-            --title "Merge back: ${VERSION}" \
-            --body "$(echo -e "Release **${VERSION}** has ${{ steps.mergeback.outputs.ahead }} commit(s) on \`${BRANCH}\` that need merging back to \`main\`.\n\n## Steps\n\n\`\`\`bash\ngit fetch origin\ngit checkout main\ngit pull origin main\ngit checkout -b merge-back/${VERSION#v}\ngit merge origin/${BRANCH}\n# Resolve conflicts if any\ngit push origin merge-back/${VERSION#v}\n\`\`\`\n\nThen open a PR from \`merge-back/${VERSION#v}\` to \`main\`:\n\nhttps://github.com/${{ github.repository }}/compare/main...merge-back/${VERSION#v}?expand=1\n\nClose this issue once the PR is merged.")"
+            --title "Merge back: ${FINAL}" \
+            --body "$(echo -e "Release **${FINAL}** has ${AHEAD} commit(s) on \`${BRANCH}\` that need merging back to \`main\`.\n\n## Steps\n\n\`\`\`bash\ngit fetch origin\ngit checkout main\ngit pull origin main\ngit checkout -b merge-back/${MERGE_VERSION}\ngit merge origin/${BRANCH}\n# Resolve conflicts if any\ngit push origin merge-back/${MERGE_VERSION}\n\`\`\`\n\nThen open a PR from \`merge-back/${MERGE_VERSION}\` to \`main\`:\n\nhttps://github.com/${{ github.repository }}/compare/main...merge-back/${MERGE_VERSION}?expand=1\n\nClose this issue once the PR is merged.")"
 
       - name: Summary
         run: |
+          FINAL="${{ steps.final.outputs.version }}"
           echo "## Release Finalised" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Release:** ${{ steps.final.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **From RC:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release:** ${FINAL}" >> $GITHUB_STEP_SUMMARY
+          echo "- **From RC:** ${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "- **GitHub Release created** with auto-generated notes" >> $GITHUB_STEP_SUMMARY
           if [[ "${{ steps.mergeback.outputs.needed }}" == "true" ]]; then
             echo "- **Merge-back required** — ${{ steps.mergeback.outputs.ahead }} commit(s) need merging to main. See issue." >> $GITHUB_STEP_SUMMARY

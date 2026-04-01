@@ -16,6 +16,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
+    env:
+      VERSION: ${{ inputs.version }}
+      ENVIRONMENT: ${{ inputs.environment }}
     steps:
       - name: Checkout tagged commit
         uses: actions/checkout@v6
@@ -24,32 +27,32 @@ jobs:
 
       - name: Read environment config
         run: |
-          CONFIG_FILE="environments/${{ inputs.environment }}.json"
-          if [[ ! -f "$CONFIG_FILE" ]]; then
-            echo "::error::Config file $CONFIG_FILE not found"
+          CONFIG_FILE="environments/${ENVIRONMENT}.json"
+          if [[ ! -f "${CONFIG_FILE}" ]]; then
+            echo "::error::Config file ${CONFIG_FILE} not found"
             exit 1
           fi
           echo "## Deployment" >> $GITHUB_STEP_SUMMARY
-          echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${ENVIRONMENT}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** $(git rev-parse HEAD)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```json' >> $GITHUB_STEP_SUMMARY
-          cat "$CONFIG_FILE" >> $GITHUB_STEP_SUMMARY
+          cat "${CONFIG_FILE}" >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Simulate deployment
         run: |
           echo "============================================"
-          echo "  DEPLOYING TO ${{ inputs.environment }}"
+          echo "  DEPLOYING TO ${ENVIRONMENT}"
           echo "============================================"
           echo ""
-          echo "Version:     ${{ inputs.version }}"
-          echo "Environment: ${{ inputs.environment }}"
+          echo "Version:     ${VERSION}"
+          echo "Environment: ${ENVIRONMENT}"
           echo "Commit:      $(git rev-parse HEAD)"
           echo "Config:"
-          cat environments/${{ inputs.environment }}.json
+          cat "environments/${ENVIRONMENT}.json"
           echo ""
           echo "============================================"
           echo "  DEPLOYMENT COMPLETE"

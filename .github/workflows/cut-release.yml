@@ -15,30 +15,27 @@ permissions:
 jobs:
   cut-release:
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
     steps:
+      - name: Validate version format
+        run: |
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version must be in semver format (e.g., 1.2.0)"
+            exit 1
+          fi
+
       - name: Checkout main
         uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
 
-      - name: Validate version format
-        run: |
-          if [[ ! "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Version must be in semver format (e.g., 1.2.0)"
-            exit 1
-          fi
-
       - name: Check no other release is in-flight
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          # Find all release branches
           BRANCHES=$(git ls-remote --heads origin 'release/*' | awk '{print $2}' | sed 's|refs/heads/||')
           for BRANCH in $BRANCHES; do
-            # Extract version from branch name (release/X.Y.Z -> X.Y.Z)
             BRANCH_VERSION=$(echo "$BRANCH" | sed 's|release/||')
-            # Check if this release has been finalised (final tag exists)
             if ! git ls-remote --tags origin "refs/tags/v${BRANCH_VERSION}" | grep -q .; then
               echo "::error::Release $BRANCH is still in-flight (no final tag v${BRANCH_VERSION}). Only one release at a time."
               exit 1
@@ -47,40 +44,40 @@ jobs:
 
       - name: Check release branch does not already exist
         run: |
-          if git ls-remote --heads origin release/${{ inputs.version }} | grep -q .; then
-            echo "::error::Branch release/${{ inputs.version }} already exists"
+          if git ls-remote --heads origin "release/${VERSION}" | grep -q .; then
+            echo "::error::Branch release/${VERSION} already exists"
             exit 1
           fi
 
       - name: Check RC tag does not already exist
         run: |
-          if git ls-remote --tags origin refs/tags/v${{ inputs.version }}-rc.1 | grep -q .; then
-            echo "::error::Tag v${{ inputs.version }}-rc.1 already exists"
+          if git ls-remote --tags origin "refs/tags/v${VERSION}-rc.1" | grep -q .; then
+            echo "::error::Tag v${VERSION}-rc.1 already exists"
             exit 1
           fi
 
       - name: Create release branch
         run: |
-          git checkout -b release/${{ inputs.version }}
-          git push origin release/${{ inputs.version }}
+          git checkout -b "release/${VERSION}"
+          git push origin "release/${VERSION}"
 
       - name: Create first RC tag
         run: |
-          git tag v${{ inputs.version }}-rc.1
-          git push origin v${{ inputs.version }}-rc.1
+          git tag "v${VERSION}-rc.1"
+          git push origin "v${VERSION}-rc.1"
 
       - name: Trigger promotion pipeline
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh workflow run promote.yml --ref release/${{ inputs.version }} -f version=v${{ inputs.version }}-rc.1
+          gh workflow run promote.yml --ref "release/${VERSION}" -f "version=v${VERSION}-rc.1"
 
       - name: Summary
         run: |
           echo "## Release Cut" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch:** release/${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Tag:** v${{ inputs.version }}-rc.1" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** release/${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag:** v${VERSION}-rc.1" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** $(git rev-parse HEAD)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "The **Promote** workflow has been triggered automatically." >> $GITHUB_STEP_SUMMARY

@@ -15,10 +15,12 @@ permissions:
 jobs:
   tag-rc:
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
     steps:
       - name: Validate version format
         run: |
-          if [[ ! "${{ inputs.version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Version must be in semver format (e.g., 1.2.0)"
             exit 1
           fi
@@ -27,8 +29,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh api repos/${{ github.repository }}/branches/release%2F${{ inputs.version }} --silent 2>/dev/null; then
-            echo "::error::Branch release/${{ inputs.version }} does not exist. Cut a release first."
+          if ! gh api "repos/${{ github.repository }}/branches/release%2F${VERSION}" --silent 2>/dev/null; then
+            echo "::error::Branch release/${VERSION} does not exist. Cut a release first."
             exit 1
           fi
 
@@ -41,10 +43,9 @@ jobs:
       - name: Determine next RC number
         id: next-rc
         run: |
-          # Find the highest existing RC number for this version
-          HIGHEST=$(git ls-remote --tags origin "refs/tags/v${{ inputs.version }}-rc.*" \
+          HIGHEST=$(git ls-remote --tags origin "refs/tags/v${VERSION}-rc.*" \
             | awk '{print $2}' \
-            | sed 's|refs/tags/v${{ inputs.version }}-rc.||' \
+            | sed "s|refs/tags/v${VERSION}-rc.||" \
             | sort -n \
             | tail -1)
           if [[ -z "$HIGHEST" ]]; then
@@ -52,27 +53,27 @@ jobs:
           else
             NEXT=$((HIGHEST + 1))
           fi
-          TAG="v${{ inputs.version }}-rc.${NEXT}"
+          TAG="v${VERSION}-rc.${NEXT}"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
           echo "Next RC tag: $TAG"
 
       - name: Create RC tag
         run: |
-          git tag ${{ steps.next-rc.outputs.tag }}
-          git push origin ${{ steps.next-rc.outputs.tag }}
+          git tag "${{ steps.next-rc.outputs.tag }}"
+          git push origin "${{ steps.next-rc.outputs.tag }}"
 
       - name: Trigger promotion pipeline
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh workflow run promote.yml --ref release/${{ inputs.version }} -f version=${{ steps.next-rc.outputs.tag }}
+          gh workflow run promote.yml --ref "release/${VERSION}" -f "version=${{ steps.next-rc.outputs.tag }}"
 
       - name: Summary
         run: |
           echo "## New RC Tagged" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Tag:** ${{ steps.next-rc.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch:** release/${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch:** release/${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "- **Commit:** $(git rev-parse HEAD)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "The **Promote** workflow has been triggered automatically." >> $GITHUB_STEP_SUMMARY
