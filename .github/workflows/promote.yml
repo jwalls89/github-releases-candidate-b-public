@@ -14,6 +14,7 @@ concurrency:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   validate:
@@ -95,6 +96,45 @@ jobs:
               --title "${{ steps.final.outputs.version }}" \
               --generate-notes \
               --latest
+          fi
+
+      - name: Determine release branch
+        id: branch
+        run: |
+          # Strip v prefix and -rc.N suffix to get X.Y.Z, then build branch name
+          VERSION=$(echo "${{ inputs.version }}" | sed 's/^v//; s/-rc\.[0-9]*//')
+          echo "name=release/${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Open merge-back PR if release branch has diverged
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="${{ steps.branch.outputs.name }}"
+          # Check if release branch has commits not on main
+          AHEAD=$(git rev-list --count main..${BRANCH})
+          if [[ "$AHEAD" -eq 0 ]]; then
+            echo "Release branch has no new commits — no merge-back needed"
+          else
+            echo "Release branch is $AHEAD commit(s) ahead of main — opening merge-back PR"
+            # Check if a merge-back PR already exists
+            EXISTING=$(gh pr list --base main --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+            if [[ -n "$EXISTING" ]]; then
+              echo "Merge-back PR #$EXISTING already exists — skipping"
+            else
+              gh pr create \
+                --base main \
+                --head "$BRANCH" \
+                --title "Merge back: ${{ steps.final.outputs.version }}" \
+                --body "$(cat <<'BODY'
+Automated merge-back of release branch changes to main.
+
+**Release:** ${{ steps.final.outputs.version }}
+**Branch:** ${{ steps.branch.outputs.name }}
+
+This PR brings fixes made during release promotion back to main. Review and merge to ensure main has all production fixes.
+BODY
+              )"
+            fi
           fi
 
       - name: Summary
