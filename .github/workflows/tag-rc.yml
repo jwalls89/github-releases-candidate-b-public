@@ -24,8 +24,10 @@ jobs:
           fi
 
       - name: Check release branch exists
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if ! git ls-remote --heads origin release/${{ inputs.version }} | grep -q .; then
+          if ! gh api repos/${{ github.repository }}/branches/release%2F${{ inputs.version }} --silent 2>/dev/null; then
             echo "::error::Branch release/${{ inputs.version }} does not exist. Cut a release first."
             exit 1
           fi
