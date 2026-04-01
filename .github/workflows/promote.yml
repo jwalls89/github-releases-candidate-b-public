@@ -14,7 +14,7 @@ concurrency:
 
 permissions:
   contents: write
-  pull-requests: write
+  issues: write
 
 jobs:
   validate:
@@ -105,33 +105,42 @@ jobs:
           VERSION=$(echo "${{ inputs.version }}" | sed 's/^v//; s/-rc\.[0-9]*//')
           echo "name=release/${VERSION}" >> $GITHUB_OUTPUT
 
-      - name: Open merge-back PR if release branch has diverged
+      - name: Check for merge-back need
+        id: mergeback
+        run: |
+          BRANCH="${{ steps.branch.outputs.name }}"
+          AHEAD=$(git rev-list --count origin/main..origin/${BRANCH})
+          echo "ahead=$AHEAD" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          if [[ "$AHEAD" -eq 0 ]]; then
+            echo "Release branch has no new commits — no merge-back needed"
+            echo "needed=false" >> $GITHUB_OUTPUT
+          else
+            echo "Release branch is $AHEAD commit(s) ahead of main — merge-back required"
+            echo "needed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Annotate GitHub Release with merge-back note
+        if: steps.mergeback.outputs.needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          BRANCH="${{ steps.branch.outputs.name }}"
-          # Check if release branch has commits not on main
-          AHEAD=$(git rev-list --count origin/main..origin/${BRANCH})
-          if [[ "$AHEAD" -eq 0 ]]; then
-            echo "Release branch has no new commits — no merge-back needed"
-          else
-            echo "Release branch is $AHEAD commit(s) ahead of main — opening merge-back PR"
-            # Check if a merge-back PR already exists
-            EXISTING=$(gh pr list --base main --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
-            if [[ -n "$EXISTING" ]]; then
-              echo "Merge-back PR #$EXISTING already exists — skipping"
-            else
-              BODY="Automated merge-back of release branch changes to main."
-              BODY="${BODY}\n\n**Release:** ${{ steps.final.outputs.version }}"
-              BODY="${BODY}\n**Branch:** ${{ steps.branch.outputs.name }}"
-              BODY="${BODY}\n\nThis PR brings fixes made during release promotion back to main."
-              gh pr create \
-                --base main \
-                --head "$BRANCH" \
-                --title "Merge back: ${{ steps.final.outputs.version }}" \
-                --body "$(echo -e "$BODY")"
-            fi
-          fi
+          EXISTING_NOTES=$(gh release view ${{ steps.final.outputs.version }} --json body --jq '.body')
+          MERGE_NOTE="---"
+          MERGE_NOTE="${MERGE_NOTE}\n\n⚠️ **Merge-back required:** This release has ${{ steps.mergeback.outputs.ahead }} commit(s) on \`${{ steps.mergeback.outputs.branch }}\` that are not on \`main\`. See the merge-back issue for instructions."
+          gh release edit ${{ steps.final.outputs.version }} \
+            --notes "$(echo -e "${EXISTING_NOTES}\n\n${MERGE_NOTE}")"
+
+      - name: Create merge-back issue
+        if: steps.mergeback.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BRANCH="${{ steps.mergeback.outputs.branch }}"
+          VERSION="${{ steps.final.outputs.version }}"
+          gh issue create \
+            --title "Merge back: ${VERSION}" \
+            --body "$(echo -e "Release **${VERSION}** has ${{ steps.mergeback.outputs.ahead }} commit(s) on \`${BRANCH}\` that need merging back to \`main\`.\n\n## Steps\n\n\`\`\`bash\ngit fetch origin\ngit checkout main\ngit pull origin main\ngit checkout -b merge-back/${VERSION#v}\ngit merge origin/${BRANCH}\n# Resolve conflicts if any\ngit push origin merge-back/${VERSION#v}\n\`\`\`\n\nThen open a PR from \`merge-back/${VERSION#v}\` to \`main\`:\n\nhttps://github.com/${{ github.repository }}/compare/main...merge-back/${VERSION#v}?expand=1\n\nClose this issue once the PR is merged.")"
 
       - name: Summary
         run: |
@@ -140,3 +149,8 @@ jobs:
           echo "- **Release:** ${{ steps.final.outputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **From RC:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **GitHub Release created** with auto-generated notes" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.mergeback.outputs.needed }}" == "true" ]]; then
+            echo "- **Merge-back required** — ${{ steps.mergeback.outputs.ahead }} commit(s) need merging to main. See issue." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **No merge-back needed** — release branch has no new commits" >> $GITHUB_STEP_SUMMARY
+          fi
