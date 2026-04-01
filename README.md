@@ -25,6 +25,22 @@ Trunk-based development with release branches and tag-driven promotion through e
                                          └── branch kept for hotfixes
 ```
 
+### Hotfix Flow
+
+```
+  release/1.3.0:   ──A──B──fix──     (original release, v1.3.0 tagged at fix)
+                         │
+                         │  v1.3.0 tag
+                         │
+  release/1.3.1:         └──hotfix──  (new branch from v1.3.0 tag)
+                            │
+                            ├── v1.3.1-rc.1
+                            ├── test → preprod → prod
+                            └── v1.3.1 (final)
+```
+
+Each hotfix gets its own branch from the release tag. If a hotfix is bad, abandon it and start fresh — the original tag is untouched.
+
 ### Pipeline Flow
 
 ```
@@ -39,12 +55,13 @@ Trunk-based development with release branches and tag-driven promotion through e
                            │  Creates: final tag + GitHub Release            │
  ┌──────────────┐         │                                                 │
  │  Tag New RC   │ triggers│  (same pipeline restarts from test)             │
- │  (manual)     │────────►│                                                 │
- │               │         └─────────────────────────────────────────────────┘
- │ After a fix,  │
- │ creates next  │
- │ RC tag        │
- └──────────────┘
+ │  (after fix)  │────────►│                                                 │
+ └──────────────┘         │                                                 │
+                           │                                                 │
+ ┌──────────────┐         │                                                 │
+ │  Hotfix       │         │  (creates branch, then Tag New RC to promote)   │
+ │  (after fix)  │────────►│                                                 │
+ └──────────────┘         └─────────────────────────────────────────────────┘
 ```
 
 ### Key Concepts
@@ -52,7 +69,8 @@ Trunk-based development with release branches and tag-driven promotion through e
 | Concept | What it means |
 |---------|---------------|
 | **main** | Where all development happens. Never stops. |
-| **release/X.Y.Z** | Cut from main when ready to release. Lives ~1 week. |
+| **release/X.Y.0** | Cut from main when ready to release. Lives ~1 week during promotion. |
+| **release/X.Y.Z** (Z>0) | Hotfix branch, cut from a release tag. Isolated from the original. |
 | **v1.2.0-rc.N** | Release candidate tag. Triggers the promotion pipeline. |
 | **v1.2.0** | Final release tag. Created automatically when RC reaches prod. |
 | **GitHub Release** | Created only when deployed to prod. This IS the release. |
@@ -69,9 +87,10 @@ Trunk-based development with release branches and tag-driven promotion through e
 
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
-| **Cut Release** | Manual (workflow_dispatch) | Creates release branch + first RC tag, triggers Promote |
-| **Tag New RC** | Manual (workflow_dispatch) | Creates next RC tag on release branch after a fix, triggers Promote |
-| **Promote** | Auto-triggered by Cut Release or Tag New RC | Deploys through test → preprod → prod, finalises release |
+| **Cut Release** | Manual | Creates release branch from main + first RC tag, triggers Promote |
+| **Tag New RC** | Manual | Creates next RC tag on a release branch after a fix, triggers Promote |
+| **Hotfix** | Manual | Creates a new patch release branch from a release tag (e.g., `release/1.3.1` from `v1.3.0`) |
+| **Promote** | Auto-triggered | Deploys through test → preprod → prod, finalises release. One at a time (concurrency lock). |
 | **Deploy** | Called by Promote | Reusable workflow that simulates deployment to one environment |
 
 ---
@@ -136,7 +155,7 @@ Release hits problems during promotion. Fix, re-tag, restart.
 1. **Cut Release** with version `1.3.0`
 2. Promote triggers automatically, deploys to test
 3. Something is wrong — bad config value in test
-4. **Do NOT approve preprod** — let it sit or reject it
+4. **Do NOT approve preprod** — the in-progress promote run will be cancelled when a new RC is tagged
 
 ### Step 2: Fix the issue on the release branch
 
@@ -180,7 +199,7 @@ git push origin main
 2. Enter version: `1.3.0`
 3. Click **Run workflow**
 
-This auto-detects the next RC number (e.g., `rc.2`), tags it, and triggers Promote. The pipeline restarts from test with the fix included.
+This auto-detects the next RC number (e.g., `rc.2`), tags it, and triggers Promote. The new promote run **automatically cancels** any in-progress promote run (concurrency lock). The pipeline restarts from test with the fix included.
 
 ### Step 4: Approve through environments
 
@@ -194,53 +213,46 @@ The RC history (`rc.1`, `rc.2`, `rc.3`) documents exactly what happened during p
 
 ## Scenario 3: Hotfix
 
-Production has a critical issue. Main has moved on. Fix what's in prod without pulling in new work.
+Production has a critical issue. Main has moved on with new work. Fix what's in prod without pulling in new features.
 
-### Step 1: Check what's in prod
+### Step 1: Create a hotfix branch
 
-The release branch `release/1.3.0` still exists and contains exactly what's in production (the commit tagged `v1.3.0`).
+1. Go to **Actions → Hotfix → Run workflow**
+2. Enter base version: `1.3.0` (the version currently in prod)
+3. Click **Run workflow**
 
-### Step 2: Fix on the release branch
+This creates `release/1.3.1` branched from the `v1.3.0` tag — an isolated copy of exactly what's in prod.
+
+### Step 2: Push your fix
 
 ```bash
-git checkout release/1.3.0
-git checkout -b hotfix/fix-timeout
+git fetch origin
+git checkout release/1.3.1
 # Make the fix
 git add .
 git commit -m "fix: increase auth timeout to prevent 504s"
-git push origin hotfix/fix-timeout
+git push origin release/1.3.1
 ```
 
-Open a PR targeting **release/1.3.0** (not main). Review and merge.
+Or via a PR targeting `release/1.3.1`.
 
-### Step 3: Tag the hotfix RC
+### Step 3: Start promotion
 
 1. Go to **Actions → Tag New RC → Run workflow**
-2. Enter version: `1.3.0`
+2. Enter version: `1.3.1`
 3. Click **Run workflow**
 
-> **Note:** The tag will be `v1.3.0-rc.N` (next available number). The finalise step will create `v1.3.0` — but wait, `v1.3.0` already exists from the original release. For a **hotfix**, you need to use a patch version instead.
+This creates `v1.3.1-rc.1` and triggers the promote pipeline.
 
-**For hotfixes, use Cut Release with the patch version:**
+### Step 4: Approve through all environments
 
-1. Manually create the tag instead:
-   ```bash
-   git checkout release/1.3.0
-   git pull origin release/1.3.0
-   git tag v1.3.1-rc.1
-   git push origin v1.3.1-rc.1
-   ```
-2. Then trigger Promote manually:
-   - Go to **Actions → Promote → Run workflow**
-   - Enter version: `v1.3.1-rc.1`
+Same flow as always:
+1. Test — automatic
+2. Preprod — approve
+3. Prod — approve
+4. Finalise — creates `v1.3.1` and GitHub Release
 
-### Step 4: Promote through all environments
-
-The pipeline deploys through test → preprod → prod as usual. Approve at each gate.
-
-The finalise step creates `v1.3.1` and a GitHub Release documenting the hotfix.
-
-### Step 5: Cherry-pick to main
+### Step 5: Cherry-pick the fix to main
 
 ```bash
 git checkout main
@@ -248,7 +260,7 @@ git cherry-pick <hotfix-commit-sha>
 git push origin main
 ```
 
-This ensures the fix is included in the next release.
+This ensures the fix is included in the next standard release.
 
 ---
 
@@ -259,7 +271,8 @@ This ensures the fix is included in the next release.
 | Cut a release | Actions → **Cut Release** → enter version (e.g., `1.2.0`) |
 | Approve promotion | Click paused workflow run → **Review deployments** → approve |
 | Fix during promotion | Commit to release branch → Actions → **Tag New RC** → enter version |
-| Hotfix production | PR to release branch → `git tag v1.3.1-rc.1` → Actions → **Promote** |
+| Start a hotfix | Actions → **Hotfix** → enter base version (e.g., `1.3.0`) |
+| Promote a hotfix | Push fix to hotfix branch → Actions → **Tag New RC** → enter hotfix version (e.g., `1.3.1`) |
 | See what's in prod | **Releases** page → latest release |
 | See what changed | Click the release → auto-generated notes |
 | See promotion history | Tags: `rc.1`, `rc.2`, ... → final `v1.2.0` |
@@ -269,6 +282,7 @@ This ensures the fix is included in the next release.
 | Branch | Who commits here | Deploys to |
 |--------|-----------------|------------|
 | `main` | Everyone (via PRs) | dev |
-| `release/X.Y.Z` | Fixes only (cherry-picks or direct) | test → preprod → prod |
+| `release/X.Y.0` | Fixes only during promotion | test → preprod → prod |
+| `release/X.Y.Z` (Z>0) | Hotfix only | test → preprod → prod |
 | `feature/*` | Developer working on a feature | ephemeral (via PR) |
-| `hotfix/*` | Developer fixing prod | merged into release branch via PR |
+| `hotfix/*` | Developer fixing prod | merged into hotfix release branch via PR |
