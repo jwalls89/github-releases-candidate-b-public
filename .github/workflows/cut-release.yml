@@ -30,12 +30,20 @@ jobs:
           fi
 
       - name: Check no other release is in-flight
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          EXISTING=$(git ls-remote --heads origin 'release/*' | awk '{print $2}' | sed 's|refs/heads/||')
-          if [[ -n "$EXISTING" ]]; then
-            echo "::error::Another release branch already exists: $EXISTING. Only one release at a time."
-            exit 1
-          fi
+          # Find all release branches
+          BRANCHES=$(git ls-remote --heads origin 'release/*' | awk '{print $2}' | sed 's|refs/heads/||')
+          for BRANCH in $BRANCHES; do
+            # Extract version from branch name (release/X.Y.Z -> X.Y.Z)
+            BRANCH_VERSION=$(echo "$BRANCH" | sed 's|release/||')
+            # Check if this release has been finalised (final tag exists)
+            if ! git ls-remote --tags origin "refs/tags/v${BRANCH_VERSION}" | grep -q .; then
+              echo "::error::Release $BRANCH is still in-flight (no final tag v${BRANCH_VERSION}). Only one release at a time."
+              exit 1
+            fi
+          done
 
       - name: Check release branch does not already exist
         run: |
