@@ -24,12 +24,18 @@ jobs:
 
       - name: Read environment config
         run: |
+          CONFIG_FILE="environments/${{ inputs.environment }}.json"
+          if [[ ! -f "$CONFIG_FILE" ]]; then
+            echo "::error::Config file $CONFIG_FILE not found"
+            exit 1
+          fi
           echo "## Deployment" >> $GITHUB_STEP_SUMMARY
           echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** $(git rev-parse HEAD)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo '```json' >> $GITHUB_STEP_SUMMARY
-          cat environments/${{ inputs.environment }}.json >> $GITHUB_STEP_SUMMARY
+          cat "$CONFIG_FILE" >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 

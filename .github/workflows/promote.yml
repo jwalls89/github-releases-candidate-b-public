@@ -1,33 +1,56 @@
 name: Promote
 
 on:
-  push:
-    tags:
-      - "v*-rc.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "RC tag to promote (e.g., v1.2.0-rc.1)"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate RC tag format
+        run: |
+          if [[ ! "${{ inputs.version }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
+            echo "::error::Version must be an RC tag (e.g., v1.2.0-rc.1)"
+            exit 1
+          fi
+
+      - name: Validate tag exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh api repos/${{ github.repository }}/git/ref/tags/${{ inputs.version }} --silent 2>/dev/null; then
+            echo "::error::Tag ${{ inputs.version }} does not exist"
+            exit 1
+          fi
+
   deploy-test:
+    needs: validate
     uses: ./.github/workflows/deploy.yml
     with:
       environment: test
-      version: ${{ github.ref_name }}
+      version: ${{ inputs.version }}
 
   deploy-preprod:
     needs: deploy-test
     uses: ./.github/workflows/deploy.yml
     with:
       environment: preprod
-      version: ${{ github.ref_name }}
+      version: ${{ inputs.version }}
 
   deploy-prod:
     needs: deploy-preprod
     uses: ./.github/workflows/deploy.yml
     with:
       environment: prod
-      version: ${{ github.ref_name }}
+      version: ${{ inputs.version }}
 
   finalise:
     needs: deploy-prod
@@ -36,35 +59,44 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ inputs.version }}
           fetch-depth: 0
 
       - name: Determine final version
         id: final
         run: |
-          FINAL_VERSION=$(echo "${{ github.ref_name }}" | sed 's/-rc\.[0-9]*//')
+          FINAL_VERSION=$(echo "${{ inputs.version }}" | sed 's/-rc\.[0-9]*//')
           echo "version=$FINAL_VERSION" >> $GITHUB_OUTPUT
+          echo "Final version: $FINAL_VERSION"
 
       - name: Create final release tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a ${{ steps.final.outputs.version }} -m "Release ${{ steps.final.outputs.version }}"
-          git push origin ${{ steps.final.outputs.version }}
+          if git rev-parse "${{ steps.final.outputs.version }}" >/dev/null 2>&1; then
+            echo "Tag ${{ steps.final.outputs.version }} already exists — skipping tag creation"
+          else
+            git tag -a ${{ steps.final.outputs.version }} -m "Release ${{ steps.final.outputs.version }}"
+            git push origin ${{ steps.final.outputs.version }}
+          fi
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create ${{ steps.final.outputs.version }} \
-            --title "${{ steps.final.outputs.version }}" \
-            --generate-notes \
-            --latest
+          if gh release view ${{ steps.final.outputs.version }} >/dev/null 2>&1; then
+            echo "Release ${{ steps.final.outputs.version }} already exists — skipping"
+          else
+            gh release create ${{ steps.final.outputs.version }} \
+              --title "${{ steps.final.outputs.version }}" \
+              --generate-notes \
+              --latest
+          fi
 
       - name: Summary
         run: |
           echo "## Release Finalised" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Release:** ${{ steps.final.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **From RC:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **From RC:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "- **GitHub Release created** with auto-generated notes" >> $GITHUB_STEP_SUMMARY
