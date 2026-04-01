@@ -31,6 +31,20 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      - name: Check version is higher than last release
+        run: |
+          LATEST_TAG=$(git tag --list 'v*' --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          if [[ -n "$LATEST_TAG" ]]; then
+            LATEST="${LATEST_TAG#v}"
+            echo "Latest release: ${LATEST}"
+            # Compare using sort -V (version sort)
+            HIGHER=$(echo -e "${LATEST}\n${VERSION}" | sort -V | tail -1)
+            if [[ "${HIGHER}" == "${LATEST}" ]]; then
+              echo "::error::Version ${VERSION} is not higher than the latest release ${LATEST}"
+              exit 1
+            fi
+          fi
+
       - name: Check no other release is in-flight
         run: |
           BRANCHES=$(git ls-remote --heads origin 'release/*' | awk '{print $2}' | sed 's|refs/heads/||')
