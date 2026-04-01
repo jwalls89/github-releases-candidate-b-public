@@ -19,20 +19,29 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.normalise.outputs.version }}
     env:
       VERSION: ${{ inputs.version }}
     steps:
-      - name: Validate RC tag format
+      - name: Normalise and validate RC tag format
+        id: normalise
         run: |
+          # Add v prefix if missing
+          if [[ "${VERSION}" =~ ^[0-9] ]]; then
+            VERSION="v${VERSION}"
+          fi
           if [[ ! "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-rc\.[0-9]+$ ]]; then
-            echo "::error::Version must be an RC tag (e.g., v1.2.0-rc.1)"
+            echo "::error::Version must be an RC tag (e.g., v1.2.0-rc.1 or 1.2.0-rc.1)"
             exit 1
           fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
       - name: Validate tag exists
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          VERSION="${{ steps.normalise.outputs.version }}"
           if ! gh api "repos/${{ github.repository }}/git/ref/tags/${VERSION}" --silent 2>/dev/null; then
             echo "::error::Tag ${VERSION} does not exist"
             exit 1
@@ -43,32 +52,32 @@ jobs:
     uses: ./.github/workflows/deploy.yml
     with:
       environment: test
-      version: ${{ inputs.version }}
+      version: ${{ needs.validate.outputs.version }}
 
   deploy-preprod:
-    needs: deploy-test
+    needs: [validate, deploy-test]
     uses: ./.github/workflows/deploy.yml
     with:
       environment: preprod
-      version: ${{ inputs.version }}
+      version: ${{ needs.validate.outputs.version }}
 
   deploy-prod:
-    needs: deploy-preprod
+    needs: [validate, deploy-preprod]
     uses: ./.github/workflows/deploy.yml
     with:
       environment: prod
-      version: ${{ inputs.version }}
+      version: ${{ needs.validate.outputs.version }}
 
   finalise:
-    needs: deploy-prod
+    needs: [validate, deploy-prod]
     runs-on: ubuntu-latest
     env:
-      VERSION: ${{ inputs.version }}
+      VERSION: ${{ needs.validate.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ inputs.version }}
+          ref: ${{ needs.validate.outputs.version }}
           fetch-depth: 0
 
       - name: Determine final version
