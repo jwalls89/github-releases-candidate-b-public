@@ -65,7 +65,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh workflow run promote.yml -f version=${{ steps.next-rc.outputs.tag }}
+          gh workflow run promote.yml --ref release/${{ inputs.version }} -f version=${{ steps.next-rc.outputs.tag }}
 
       - name: Summary
         run: |

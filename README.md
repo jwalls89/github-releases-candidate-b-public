@@ -85,13 +85,13 @@ Each hotfix gets its own branch from the release tag. If a hotfix is bad, abando
 
 ### Workflows
 
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| **Cut Release** | Manual | Creates release branch from main + first RC tag, triggers Promote |
-| **Tag New RC** | Manual | Creates next RC tag on a release branch after a fix, triggers Promote |
-| **Hotfix** | Manual | Creates a new patch release branch from a release tag (e.g., `release/1.3.1` from `v1.3.0`) |
-| **Promote** | Auto-triggered | Deploys through test → preprod → prod, finalises release. One at a time (concurrency lock). |
-| **Deploy** | Called by Promote | Reusable workflow that simulates deployment to one environment |
+| Workflow | Run from branch | Trigger | Purpose |
+|----------|----------------|---------|---------|
+| **Cut Release** | `main` | Manual | Creates release branch from main + first RC tag, triggers Promote |
+| **Tag New RC** | `release/*` | Manual | Creates next RC tag on a release branch after a fix, triggers Promote |
+| **Hotfix** | `main` | Manual | Creates a new patch release branch from a release tag (e.g., `release/1.3.1` from `v1.3.0`) |
+| **Promote** | `release/*` | Auto-triggered | Deploys through test → preprod → prod, finalises release. One at a time (concurrency lock). |
+| **Deploy** | `release/*` | Called by Promote | Reusable workflow that simulates deployment to one environment |
 
 ---
 
@@ -195,11 +195,12 @@ git push origin main
 
 ### Step 3: Tag a new RC and restart promotion
 
-1. Go to **Actions → Tag New RC → Run workflow**
-2. Enter version: `1.3.0`
-3. Click **Run workflow**
+1. Go to **Actions → Tag New RC**
+2. In the branch dropdown, **select `release/1.3.0`** (not main)
+3. Enter version: `1.3.0`
+4. Click **Run workflow**
 
-This auto-detects the next RC number (e.g., `rc.2`), tags it, and triggers Promote. The new promote run **automatically cancels** any in-progress promote run (concurrency lock). The pipeline restarts from test with the fix included.
+This auto-detects the next RC number (e.g., `rc.2`), tags it, and triggers Promote on the release branch. The new promote run **automatically cancels** any in-progress promote run (concurrency lock). The pipeline restarts from test with the fix included.
 
 ### Step 4: Approve through environments
 
@@ -238,11 +239,12 @@ Or via a PR targeting `release/1.3.1`.
 
 ### Step 3: Start promotion
 
-1. Go to **Actions → Tag New RC → Run workflow**
-2. Enter version: `1.3.1`
-3. Click **Run workflow**
+1. Go to **Actions → Tag New RC**
+2. In the branch dropdown, **select `release/1.3.1`** (not main)
+3. Enter version: `1.3.1`
+4. Click **Run workflow**
 
-This creates `v1.3.1-rc.1` and triggers the promote pipeline.
+This creates `v1.3.1-rc.1` and triggers the promote pipeline on the release branch.
 
 ### Step 4: Approve through all environments
 
@@ -270,9 +272,9 @@ This ensures the fix is included in the next standard release.
 |--------|-----|
 | Cut a release | Actions → **Cut Release** → enter version (e.g., `1.2.0`) |
 | Approve promotion | Click paused workflow run → **Review deployments** → approve |
-| Fix during promotion | Commit to release branch → Actions → **Tag New RC** → enter version |
-| Start a hotfix | Actions → **Hotfix** → enter base version (e.g., `1.3.0`) |
-| Promote a hotfix | Push fix to hotfix branch → Actions → **Tag New RC** → enter hotfix version (e.g., `1.3.1`) |
+| Fix during promotion | Commit to release branch → Actions → **Tag New RC** (select release branch) → enter version |
+| Start a hotfix | Actions → **Hotfix** (from main) → enter base version (e.g., `1.3.0`) |
+| Promote a hotfix | Push fix to hotfix branch → Actions → **Tag New RC** (select hotfix branch) → enter version |
 | See what's in prod | **Releases** page → latest release |
 | See what changed | Click the release → auto-generated notes |
 | See promotion history | Tags: `rc.1`, `rc.2`, ... → final `v1.2.0` |

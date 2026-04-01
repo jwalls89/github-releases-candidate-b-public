@@ -111,7 +111,7 @@ jobs:
         run: |
           BRANCH="${{ steps.branch.outputs.name }}"
           # Check if release branch has commits not on main
-          AHEAD=$(git rev-list --count main..${BRANCH})
+          AHEAD=$(git rev-list --count origin/main..origin/${BRANCH})
           if [[ "$AHEAD" -eq 0 ]]; then
             echo "Release branch has no new commits — no merge-back needed"
           else
@@ -121,19 +121,15 @@ jobs:
             if [[ -n "$EXISTING" ]]; then
               echo "Merge-back PR #$EXISTING already exists — skipping"
             else
+              BODY="Automated merge-back of release branch changes to main."
+              BODY="${BODY}\n\n**Release:** ${{ steps.final.outputs.version }}"
+              BODY="${BODY}\n**Branch:** ${{ steps.branch.outputs.name }}"
+              BODY="${BODY}\n\nThis PR brings fixes made during release promotion back to main."
               gh pr create \
                 --base main \
                 --head "$BRANCH" \
                 --title "Merge back: ${{ steps.final.outputs.version }}" \
-                --body "$(cat <<'BODY'
-Automated merge-back of release branch changes to main.
-
-**Release:** ${{ steps.final.outputs.version }}
-**Branch:** ${{ steps.branch.outputs.name }}
-
-This PR brings fixes made during release promotion back to main. Review and merge to ensure main has all production fixes.
-BODY
-              )"
+                --body "$(echo -e "$BODY")"
             fi
           fi
 
