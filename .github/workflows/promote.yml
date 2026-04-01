@@ -111,7 +111,7 @@ jobs:
         run: |
           BRANCH="${{ steps.branch.outputs.name }}"
           # Check if release branch has commits not on main
-          AHEAD=$(git rev-list --count main..${BRANCH})
+          AHEAD=$(git rev-list --count origin/main..origin/${BRANCH})
           if [[ "$AHEAD" -eq 0 ]]; then
             echo "Release branch has no new commits — no merge-back needed"
           else
