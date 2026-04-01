@@ -34,6 +34,15 @@ jobs:
             exit 1
           fi
 
+      - name: Check release is not already finalised
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/git/ref/tags/v${VERSION}" --silent 2>/dev/null; then
+            echo "::error::Release v${VERSION} is already finalised. Use the Hotfix workflow to create a patch release instead."
+            exit 1
+          fi
+
       - name: Checkout release branch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
